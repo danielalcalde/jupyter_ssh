@@ -8,53 +8,25 @@ import threading
 from argparse import ArgumentParser
 
 from fabric import Connection
-from invoke.watchers import StreamWatcher
-class Printer(StreamWatcher):
-    
-    def __init__(self):
-        self.index = 0
-    
-    def submit(self, stream):
-        new_ = stream[self.index:]
-        print(new_, end="")
-        self.index += len(new_)
-        return b""
-
 
 
 temp_file = "/tmp/a"
 class SSHMachine:
-    def __init__(self, ip, username=None, ssh_options="",
-                ssh_ignore=[], sync_files=[], rsync_exclude=[]):
+    def __init__(self, host):
 
-        self.ip = ip
-        self.username = username
-        self.ssh_options = ssh_options
-        self.ssh_ignore = ssh_ignore
-        self._sync_files = sync_files
-        self.rsync_exclude = rsync_exclude
-        self.conn = Connection(self.ip)
+        self.host = host
+        self.conn = Connection(self.host)
         self.conn.open()
         self.client = self.conn.client 
     
     def get_host(self):
         if self.username is not None:
-            return f"{self.username}@{self.ip}"
+            return f"{self.username}@{self.host}"
         else:
-            return self.ip
-
-    def run_code(self, command, *args, **kwargs):
-
-        if ("debug" in kwargs and kwargs["debug"]):
-            print(command)
-        
-        
-        #c = self.compile_code(command)
-        #return run_code_local(c, ignore=self.ssh_ignore, *args, **kwargs)
+            return self.host
     
     def run_code(self, command, verbose=False, wait=True, debug=False, ignore=[]):
         if debug: print(command)
-        stdin, stdout, stderr = self.client.exec_command(command)
 
         chan = self.client._transport.open_session()
         chan.set_combine_stderr(True)
@@ -71,18 +43,10 @@ class SSHMachine:
 
         return follow_output(stdout, verbose=verbose)
     
-    def compile_code(self, command):
-        command = f"""
-        source /etc/profile
-        source ~/.bashrc
-        """ + command
-
-        # Write command to txt file
-        with open(temp_file, "w") as text_file:
-            text_file.write(command)
-
-        c = f"ssh {self.ssh_options} {self.get_host()}  'bash -s' < {temp_file}"
-        return c
+    def open_ssh_tunnel(self, eport, lport):
+        #o = machine.conn.forward_local(eport, lport)
+        #o.__enter__()
+        return run_code_local(f"ssh -N -f -L localhost:{lport}:localhost:{eport} {self.host}", verbose=False, wait=False, debug=True)
 
 
 def run_code_local(command, verbose=False, wait=True, debug=False, ignore=[]):
@@ -108,7 +72,7 @@ def follow_output(stdout, verbose=False):
 
 def start_jupyter_notebook(machine, lport, mode="notebook"):
     tunel_opened = False
-    stdout = machine.run_code(f"jupyter-{mode} --no-browser --port={lport}", verbose=False, wait=False, debug=True)
+    stdout = machine.run_code(f"jupyter-{mode} --no-browser --port={lport}", verbose=False, wait=False, debug=False)
 
     for line in stdout:
         if hasattr(line, "decode"):
@@ -127,7 +91,7 @@ def start_jupyter_notebook(machine, lport, mode="notebook"):
             
             line = line.replace(str(eport), str(lport))
             if not tunel_opened:
-                pid = open_ssh_tunnel(machine, eport, lport)
+                machine.open_ssh_tunnel(eport, lport)
                 tunel_opened = True
 
         print(line)
@@ -153,11 +117,6 @@ def get_next_open_port(port, max_inc=10):
     if i > max_inc:
         raise Exception(f"Could not find open port between {port - max_inc} and {port}")
     return port
-
-def open_ssh_tunnel(machine, eport, lport):
-    #o = machine.conn.forward_local(eport, lport)
-    #o.__enter__()
-    return run_code_local(f"ssh -N -f -L localhost:{lport}:localhost:{eport} {machine.ip}", verbose=False, wait=False, debug=True)
 
 
 def check_and_start_notebook(machine, port, mode="notebook"):
@@ -185,7 +144,7 @@ def check_and_start_notebook(machine, port, mode="notebook"):
         lport = get_next_open_port(eport)
     
     
-        pid = open_ssh_tunnel(machine, eport, lport)
+        machine.open_ssh_tunnel(eport, lport)
 
         instance = instance.replace(str(eport), str(lport))
         print(f"Local Jupyter address: {instance}")
@@ -195,7 +154,7 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("mode")
 
-    parser.add_argument("vm")
+    parser.add_argument("host")
 
     parser.add_argument("-p", "--port", dest="port", help="Local Port.", default=8888)
 
@@ -206,7 +165,7 @@ if __name__ == "__main__":
     pargs = parser.parse_args()
 
     #Begining of code
-    machine = SSHMachine(ip=pargs.vm)
+    machine = SSHMachine(host=pargs.host)
     
     if pargs.mode == "notebook" or pargs.mode == "lab":
         check_and_start_notebook(machine, pargs.port, mode=pargs.mode)
