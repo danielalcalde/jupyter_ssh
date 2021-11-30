@@ -9,8 +9,6 @@ from argparse import ArgumentParser
 
 from fabric import Connection
 
-
-temp_file = "/tmp/a"
 class SSHMachine:
     def __init__(self, host):
 

@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 setuptools.setup(
      name='jupyter_ssh',
      version='0.0.1',
-     scripts=['jupyter_ssh"] ,
+     scripts=['jupyter_ssh'],
      author="Daniel Alcalde Puente",
      author_email="d.alcald.epuente@fz-juelich.de",
      description="A tool for easily opening jupyter notebook remotely through ssh.",
