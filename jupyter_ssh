@@ -1,0 +1,218 @@
+#!/usr/bin/env python
+
+import os
+import re
+import socket
+import subprocess
+import threading
+from argparse import ArgumentParser
+
+from fabric import Connection
+from invoke.watchers import StreamWatcher
+class Printer(StreamWatcher):
+    
+    def __init__(self):
+        self.index = 0
+    
+    def submit(self, stream):
+        new_ = stream[self.index:]
+        print(new_, end="")
+        self.index += len(new_)
+        return b""
+
+
+
+temp_file = "/tmp/a"
+class SSHMachine:
+    def __init__(self, ip, username=None, ssh_options="",
+                ssh_ignore=[], sync_files=[], rsync_exclude=[]):
+
+        self.ip = ip
+        self.username = username
+        self.ssh_options = ssh_options
+        self.ssh_ignore = ssh_ignore
+        self._sync_files = sync_files
+        self.rsync_exclude = rsync_exclude
+        self.conn = Connection(self.ip)
+        self.conn.open()
+        self.client = self.conn.client 
+    
+    def get_host(self):
+        if self.username is not None:
+            return f"{self.username}@{self.ip}"
+        else:
+            return self.ip
+
+    def run_code(self, command, *args, **kwargs):
+
+        if ("debug" in kwargs and kwargs["debug"]):
+            print(command)
+        
+        
+        #c = self.compile_code(command)
+        #return run_code_local(c, ignore=self.ssh_ignore, *args, **kwargs)
+    
+    def run_code(self, command, verbose=False, wait=True, debug=False, ignore=[]):
+        if debug: print(command)
+        stdin, stdout, stderr = self.client.exec_command(command)
+
+        chan = self.client._transport.open_session()
+        chan.set_combine_stderr(True)
+        chan.settimeout(None)
+        #environment = {"PYTHONUNBUFFERED" : 1}
+        #chan.update_environment(environment)
+        chan.exec_command(command)
+        stdin = chan.makefile_stdin("wb", -1)
+        stdout = chan.makefile("r", -1)
+
+        #subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, executable="/bin/bash")
+        if wait == False:
+            return stdout
+
+        return follow_output(stdout, verbose=verbose)
+    
+    def compile_code(self, command):
+        command = f"""
+        source /etc/profile
+        source ~/.bashrc
+        """ + command
+
+        # Write command to txt file
+        with open(temp_file, "w") as text_file:
+            text_file.write(command)
+
+        c = f"ssh {self.ssh_options} {self.get_host()}  'bash -s' < {temp_file}"
+        return c
+
+
+def run_code_local(command, verbose=False, wait=True, debug=False, ignore=[]):
+    if debug: print(command)
+    p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, executable="/bin/bash")
+    if not wait:
+        return p.stdout
+    
+    return follow_output(p.stdout, verbose=verbose)
+
+def follow_output(stdout, verbose=False):
+    lines = []
+    for line in stdout:
+        if hasattr(line, "decode"):
+            line = line.decode("utf-8")
+
+        lll = line[:-1]
+        if verbose: print(lll)
+        lines.append(lll)
+    
+    return lines
+
+
+def start_jupyter_notebook(machine, lport, mode="notebook"):
+    tunel_opened = False
+    stdout = machine.run_code(f"jupyter-{mode} --no-browser --port={lport}", verbose=False, wait=False, debug=True)
+
+    for line in stdout:
+        if hasattr(line, "decode"):
+            line = line.decode("utf-8")
+        line = line[:-1]
+
+        port_search = re.search('http://localhost:(.*)\\/\\?token=', line, re.IGNORECASE)
+        if not port_search:
+            port_search = re.search('http://127.0.0.1:(.*)\\/\\?token=', line, re.IGNORECASE)
+        
+        if port_search:
+            eport = port_search.group(1)
+            lport2 = get_next_open_port(eport)
+            if eport == lport2:
+                lport = eport
+            
+            line = line.replace(str(eport), str(lport))
+            if not tunel_opened:
+                pid = open_ssh_tunnel(machine, eport, lport)
+                tunel_opened = True
+
+        print(line)
+    
+def check_servers(machine):
+    servers = machine.run_code(f"jupyter notebook list", verbose=False)
+    assert servers[0] == "Currently running servers:", servers
+    return servers[1:]
+
+def check_open_port(port):
+    a_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    location = ("127.0.0.1", int(port))
+    result_of_check = a_socket.connect_ex(location)
+
+    a_socket.close()
+    return result_of_check == 0
+
+def get_next_open_port(port, max_inc=10):
+    i = 0
+    while check_open_port(port) and i <= max_inc:
+        port += 1
+        i += 1
+    if i > max_inc:
+        raise Exception(f"Could not find open port between {port - max_inc} and {port}")
+    return port
+
+def open_ssh_tunnel(machine, eport, lport):
+    #o = machine.conn.forward_local(eport, lport)
+    #o.__enter__()
+    return run_code_local(f"ssh -N -f -L localhost:{lport}:localhost:{eport} {machine.ip}", verbose=False, wait=False, debug=True)
+
+
+def check_and_start_notebook(machine, port, mode="notebook"):
+    instances = check_servers(machine)
+    if len(instances) > 0:
+        print(f"There are {len(instances)} jupyter notebook instances running on the server.")
+        for i, instance in enumerate(instances):
+            print(f"{i + 1}: {instance}")
+
+        print(f"Do you whish to create a new one (y) or reconnect to an old one (number): ")
+
+        decision = input()
+    else:
+        decision = "y" 
+    
+    if decision == "y":
+        lport = get_next_open_port(port)
+        start_jupyter_notebook(machine, lport, mode=mode)
+
+    else:
+        instance = instances[int(decision) - 1]
+        port_search = re.search('http://localhost:(.*)\\/\\?token=', instance, re.IGNORECASE)
+        eport = int(port_search.group(1))
+
+        lport = get_next_open_port(eport)
+    
+    
+        pid = open_ssh_tunnel(machine, eport, lport)
+
+        instance = instance.replace(str(eport), str(lport))
+        print(f"Local Jupyter address: {instance}")
+
+
+if __name__ == "__main__":
+    parser = ArgumentParser()
+    parser.add_argument("mode")
+
+    parser.add_argument("vm")
+
+    parser.add_argument("-p", "--port", dest="port", help="Local Port.", default=8888)
+
+    parser.add_argument("-d", "--debug",
+                        action="store_true", dest="debug", default=False,
+                        help="All commands will be printed.")
+
+    pargs = parser.parse_args()
+
+    #Begining of code
+    machine = SSHMachine(ip=pargs.vm)
+    
+    if pargs.mode == "notebook" or pargs.mode == "lab":
+        check_and_start_notebook(machine, pargs.port, mode=pargs.mode)
+    
+    elif pargs.mode == "kill":
+        machine.run_code(f"pkill -f jupyter", verbose=True)
+
+    else:
+        raise ValueError("The mode '%s' is not available." % pargs.mode)
