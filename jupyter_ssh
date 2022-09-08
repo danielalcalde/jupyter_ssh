@@ -6,6 +6,7 @@ import socket
 import subprocess
 import threading
 from argparse import ArgumentParser
+import secrets
 
 from fabric import Connection
 
@@ -70,7 +71,11 @@ def follow_output(stdout, verbose=False):
 
 def start_jupyter_notebook(machine, lport, mode="notebook"):
     tunel_opened = False
-    stdout = machine.run_code(f"jupyter-{mode} --no-browser --port={lport}", verbose=False, wait=False, debug=False)
+    folder = "$HOME/.jupyter_ssh"
+    token = secrets.token_hex(16)
+    log_name = f"{folder}/log-{token}"
+    machine.run_code(f"mkdir {folder} -p; nohup jupyter-{mode} --no-browser --port={lport}&> {log_name} &!", verbose=False, wait=False, debug=False)
+    stdout = machine.run_code(f"tail -f {log_name}", verbose=False, wait=False, debug=False)
 
     for line in stdout:
         if hasattr(line, "decode"):
@@ -135,6 +140,9 @@ def check_and_start_notebook(machine, port, mode="notebook"):
         start_jupyter_notebook(machine, lport, mode=mode)
 
     else:
+        if int(decision) > len(instances):
+            print(f"There is no instance with number {decision}.")
+            exit()
         instance = instances[int(decision) - 1]
         port_search = re.search('http://localhost:(.*)\\/\\?token=', instance, re.IGNORECASE)
         eport = int(port_search.group(1))
