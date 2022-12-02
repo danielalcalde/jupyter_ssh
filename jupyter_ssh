@@ -115,7 +115,7 @@ def check_open_port(port):
 def get_next_open_port(port, max_inc=10):
     i = 0
     while check_open_port(port) and i <= max_inc:
-        port += 1
+        port = int(port) + 1
         i += 1
     if i > max_inc:
         raise Exception(f"Could not find open port between {port - max_inc} and {port}")
