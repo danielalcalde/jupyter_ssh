@@ -31,8 +31,10 @@ class SSHMachine:
     
     def compile_code(self, command):
         command = f"""
-        source /etc/profile
-        source ~/.bashrc
+        if [ -f ~/.bashrc ]; then source ~/.bashrc; fi
+        if [ -f ~/.bash_profile ]; then source ~/.bash_profile; fi
+        if [ -f /etc/profile ]; then source /etc/profile; fi
+
         """ + command
 
         temp_file = "/tmp/a" + secrets.token_hex(4)
@@ -129,7 +131,7 @@ def start_jupyter_notebook(machine, lport, mode="notebook"):
     
 def check_servers(machine, mode="notebook"):
     servers = machine.run_code(f"jupyter {mode} list", verbose=False)
-    
+
     found = False
     for i, s in enumerate(servers):
         if s == 'Currently running servers:':
