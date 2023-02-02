@@ -31,9 +31,8 @@ class SSHMachine:
     
     def compile_code(self, command):
         command = f"""
-        if [ -f ~/.bashrc ]; then source ~/.bashrc; fi
-        if [ -f ~/.bash_profile ]; then source ~/.bash_profile; fi
         if [ -f /etc/profile ]; then source /etc/profile; fi
+        if [ -f ~/.bashrc ]; then source ~/.bashrc; fi
 
         """ + command
 
@@ -42,18 +41,16 @@ class SSHMachine:
         with open(temp_file, "w") as text_file:
             text_file.write(command)
 
-        c = f"ssh {self.get_host()}  'bash -s' < {temp_file}"
-        return c
+        return f"ssh {self.get_host()}  'bash -s' < {temp_file}"
     
     def open_ssh_tunnel(self, eport, lport):
-        #o = machine.conn.forward_local(eport, lport)
-        #o.__enter__()
-        return run_code_local(f"ssh -N -f -L localhost:{lport}:localhost:{eport} {self.host}", verbose=False, wait=False, debug=True)
+        return run_code_local(f"ssh -N -f -L localhost:{lport}:localhost:{eport} {self.get_host()}", verbose=False, wait=False, debug=True)
 
 class SSHMachineFabric(SSHMachine):
-    def __init__(self, host):
+    def __init__(self, host, username=None):
 
         self.host = host
+        self.username = username
         self.conn = Connection(self.host)
         self.conn.open()
         self.client = self.conn.client 
@@ -75,6 +72,12 @@ class SSHMachineFabric(SSHMachine):
             return stdout
 
         return follow_output(stdout, verbose=verbose)
+    
+    
+    def open_ssh_tunnel(self, eport, lport):
+        #o = machine.conn.forward_local(eport, lport)
+        #o.__enter__()
+        return run_code_local(f"ssh -N -f -L localhost:{lport}:localhost:{eport} {self.get_host()}", verbose=False, wait=False, debug=True)
 
 
 
