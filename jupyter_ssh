@@ -9,8 +9,46 @@ from argparse import ArgumentParser
 import secrets
 
 from fabric import Connection
-
 class SSHMachine:
+
+    def __init__(self, host, username=None):
+
+        self.host = host
+        self.username = username
+    
+    def get_host(self):
+        if self.username is not None:
+            return f"{self.username}@{self.host}"
+        else:
+            return self.host
+
+    #def run_code(self, command, *args, **kwargs):
+    def run_code(self, command, verbose=False, wait=True, debug=False):
+        if debug: print(command)
+        
+        code = self.compile_code(command)
+        return run_code_local(code, verbose=verbose, wait=wait, debug=debug)
+    
+    def compile_code(self, command):
+        command = f"""
+        source /etc/profile
+        source ~/.bashrc
+        """ + command
+
+        temp_file = "/tmp/a" + secrets.token_hex(4)
+        # Write command to txt file
+        with open(temp_file, "w") as text_file:
+            text_file.write(command)
+
+        c = f"ssh {self.get_host()}  'bash -s' < {temp_file}"
+        return c
+    
+    def open_ssh_tunnel(self, eport, lport):
+        #o = machine.conn.forward_local(eport, lport)
+        #o.__enter__()
+        return run_code_local(f"ssh -N -f -L localhost:{lport}:localhost:{eport} {self.host}", verbose=False, wait=False, debug=True)
+
+class SSHMachineFabric(SSHMachine):
     def __init__(self, host):
 
         self.host = host
@@ -18,13 +56,7 @@ class SSHMachine:
         self.conn.open()
         self.client = self.conn.client 
     
-    def get_host(self):
-        if self.username is not None:
-            return f"{self.username}@{self.host}"
-        else:
-            return self.host
-    
-    def run_code(self, command, verbose=False, wait=True, debug=False, ignore=[]):
+    def run_code(self, command, verbose=False, wait=True, debug=False):
         if debug: print(command)
 
         chan = self.client._transport.open_session()
@@ -41,14 +73,10 @@ class SSHMachine:
             return stdout
 
         return follow_output(stdout, verbose=verbose)
-    
-    def open_ssh_tunnel(self, eport, lport):
-        #o = machine.conn.forward_local(eport, lport)
-        #o.__enter__()
-        return run_code_local(f"ssh -N -f -L localhost:{lport}:localhost:{eport} {self.host}", verbose=False, wait=False, debug=True)
 
 
-def run_code_local(command, verbose=False, wait=True, debug=False, ignore=[]):
+
+def run_code_local(command, verbose=True, wait=True, debug=False):
     if debug: print(command)
     p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, executable="/bin/bash")
     if not wait:
@@ -99,10 +127,21 @@ def start_jupyter_notebook(machine, lport, mode="notebook"):
 
         print(line)
     
-def check_servers(machine):
-    servers = machine.run_code(f"jupyter notebook list", verbose=False)
-    assert servers[0] == "Currently running servers:", servers
-    return servers[1:]
+def check_servers(machine, mode="notebook"):
+    servers = machine.run_code(f"jupyter {mode} list", verbose=False)
+    
+    found = False
+    for i, s in enumerate(servers):
+        if s == 'Currently running servers:':
+            servers = servers[i+1:]
+            found = True
+            break
+    
+    assert found, servers
+            
+    servers = [re.sub(r'.*http', 'http', s) for s in servers]
+
+    return servers
 
 def check_open_port(port):
     a_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -123,7 +162,7 @@ def get_next_open_port(port, max_inc=10):
 
 
 def check_and_start_notebook(machine, port, mode="notebook"):
-    instances = check_servers(machine)
+    instances = check_servers(machine, mode=mode)
     if len(instances) > 0:
         print(f"There are {len(instances)} jupyter notebook instances running on the server.")
         for i, instance in enumerate(instances):
@@ -167,11 +206,16 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--debug",
                         action="store_true", dest="debug", default=False,
                         help="All commands will be printed.")
+    
+    parser.add_argument("-l", "--legacy", dest="legacy", action="store_true", default=False, help="Use legacy mode. Recommended if Fabric is not working.")
 
     pargs = parser.parse_args()
 
     #Begining of code
-    machine = SSHMachine(host=pargs.host)
+    if pargs.legacy:
+        machine = SSHMachine(host=pargs.host)
+    else:
+        machine = SSHMachineFabric(host=pargs.host)
     
     if pargs.mode == "notebook" or pargs.mode == "lab":
         check_and_start_notebook(machine, pargs.port, mode=pargs.mode)
