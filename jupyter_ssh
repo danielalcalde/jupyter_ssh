@@ -43,8 +43,8 @@ class SSHMachine:
 
         return f"ssh {self.get_host()}  'bash -s' < {temp_file}"
     
-    def open_ssh_tunnel(self, eport, lport):
-        return run_code_local(f"ssh -N -f -L localhost:{lport}:localhost:{eport} {self.get_host()}", verbose=False, wait=False, debug=True)
+    def open_ssh_tunnel(self, eport, lport, verbose=False):
+        return run_code_local(f"ssh -N -f -L localhost:{lport}:localhost:{eport} {self.get_host()}", verbose=verbose, wait=False, debug=True)
 
 class SSHMachineFabric(SSHMachine):
     def __init__(self, host, username=None):
@@ -74,10 +74,10 @@ class SSHMachineFabric(SSHMachine):
         return follow_output(stdout, verbose=verbose)
     
     
-    def open_ssh_tunnel(self, eport, lport):
+    def open_ssh_tunnel(self, eport, lport, verbose=False):
         #o = machine.conn.forward_local(eport, lport)
         #o.__enter__()
-        return run_code_local(f"ssh -N -f -L localhost:{lport}:localhost:{eport} {self.get_host()}", verbose=False, wait=False, debug=True)
+        return run_code_local(f"ssh -N -f -L localhost:{lport}:localhost:{eport} {self.get_host()}", verbose=verbose, wait=False, debug=True)
 
 
 
@@ -109,16 +109,15 @@ def start_jupyter_notebook(machine, lport, mode="notebook"):
     log_name = f"{folder}/log-{token}"
     machine.run_code(f"mkdir {folder} -p; nohup jupyter-{mode} --no-browser --port={lport}&> {log_name} &!", verbose=False, wait=False, debug=False)
     stdout = machine.run_code(f"tail -f {log_name}", verbose=False, wait=False, debug=False)
-
+    
     for line in stdout:
         if hasattr(line, "decode"):
             line = line.decode("utf-8")
         line = line[:-1]
 
-        port_search = re.search('http://localhost:(.*)\\/\\?token=', line, re.IGNORECASE)
+        port_search = re.search(r'http://localhost:(.*)/tree\?token=', line, re.IGNORECASE)
         if not port_search:
-            port_search = re.search('http://127.0.0.1:(.*)\\/\\?token=', line, re.IGNORECASE)
-        
+            port_search = re.search(r'http://127.0.0.1:(.*)/tree\?token=', line, re.IGNORECASE)
         if port_search:
             eport = port_search.group(1)
             lport2 = get_next_open_port(eport)
@@ -127,7 +126,7 @@ def start_jupyter_notebook(machine, lport, mode="notebook"):
             
             line = line.replace(str(eport), str(lport))
             if not tunel_opened:
-                machine.open_ssh_tunnel(eport, lport)
+                machine.open_ssh_tunnel(eport, lport, verbose=True)
                 tunel_opened = True
 
         print(line)
