@@ -120,6 +120,9 @@ def start_jupyter_notebook(machine, lport, mode="notebook"):
             port_search = re.search(r'http://127.0.0.1:(.*)/tree\?token=', line, re.IGNORECASE)
         if port_search:
             eport = port_search.group(1)
+            if "/" in eport:
+                eport = eport.split("/")[0]
+             
             lport2 = get_next_open_port(eport)
             if eport == lport2:
                 lport = eport
@@ -220,8 +223,8 @@ if __name__ == "__main__":
         machine = SSHMachine(host=pargs.host)
     else:
         machine = SSHMachineFabric(host=pargs.host)
-    
-    if pargs.mode == "notebook" or pargs.mode == "lab":
+    allowed_modes = ["notebook", "lab", "nbclassic"]
+    if pargs.mode in allowed_modes:
         check_and_start_notebook(machine, pargs.port, mode=pargs.mode)
     
     elif pargs.mode == "kill":
