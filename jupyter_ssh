@@ -108,7 +108,7 @@ def start_jupyter_notebook(machine, lport, mode="notebook"):
     token = secrets.token_hex(16)
     log_name = f"{folder}/log-{token}"
     machine.run_code(f"mkdir {folder} -p; nohup jupyter-{mode} --no-browser --port={lport}&> {log_name} &!", verbose=False, wait=False, debug=False)
-    stdout = machine.run_code(f"tail -f {log_name}", verbose=False, wait=False, debug=False)
+    stdout = machine.run_code(f"""while [ ! -f "{log_name}" ]; do sleep 1; done; tail -n +1 -f {log_name}""", verbose=False, wait=False, debug=False)
     
     for line in stdout:
         if hasattr(line, "decode"):
